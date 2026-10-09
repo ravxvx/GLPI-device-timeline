@@ -1,6 +1,7 @@
 # GLPI Device Timeline
 
-<img width="386" height="235" alt="image" src="https://github.com/user-attachments/assets/dc589aa9-cbe1-45ca-82b9-6a9424548187" />
+<img width="397" height="152" alt="image" src="https://github.com/user-attachments/assets/e2e9af87-b1b6-4faf-ac2f-1a3379824846" />
+
 
 <img width="295" height="267" alt="image" src="https://github.com/user-attachments/assets/bee393f6-f1a8-4a33-923e-137564555d00" />
 
