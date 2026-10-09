@@ -2,6 +2,8 @@
 
 <img width="386" height="235" alt="image" src="https://github.com/user-attachments/assets/dc589aa9-cbe1-45ca-82b9-6a9424548187" />
 
+<img width="295" height="267" alt="image" src="https://github.com/user-attachments/assets/bee393f6-f1a8-4a33-923e-137564555d00" />
+
 
 Device Timeline is an open-source plugin for GLPI 11 that provides a chronological history of computer assets.
 
