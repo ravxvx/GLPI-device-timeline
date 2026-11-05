@@ -33,7 +33,7 @@ Device Timeline is an open-source plugin for GLPI 11 that provides a chronologic
 
 ## Data and privacy
 
-The plugin reads computer history from GLPI's existing history logs and does not create a new database table in version 2.11.0.
+The plugin reads computer history from GLPI's existing history logs and does not create a new database table in version 2.13.2.
 
 ## License
 
