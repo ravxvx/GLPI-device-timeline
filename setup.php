@@ -8,13 +8,16 @@
 
 use GlpiPlugin\Devicetimeline\Timeline;
 
-define('PLUGIN_DEVICETIMELINE_VERSION', '2.11.0');
+define('PLUGIN_DEVICETIMELINE_VERSION', '2.13.2');
 
 function plugin_init_devicetimeline()
 {
     global $PLUGIN_HOOKS;
 
     $PLUGIN_HOOKS['csrf_compliant']['devicetimeline'] = true;
+
+    // Records changes of the Fields-plugin e-mail field when edited in GLPI (best effort; a cron task also checks)
+    $PLUGIN_HOOKS['item_update']['devicetimeline'] = ['PluginFieldsComputerschoolitinformation' => [Timeline::class, 'onFieldsUpdate']];
 
     // Adds the "Timeline" tab on Computer items
     Plugin::registerClass(Timeline::class, ['addtabon' => ['Computer']]);
