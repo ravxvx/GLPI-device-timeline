@@ -11,12 +11,15 @@ use Search;
 
 /**
  * Timeline tab for Computers.
- * Shows: changes of Comments, Status and Location (from GLPI's history, glpi_logs)
+ * Shows: changes of Comments, Status, Location and the Fields-plugin Student Email (own snapshot table)
  * and Problems / Tickets / Changes linked to the computer.
  */
 class Timeline extends CommonGLPI
 {
     private const OTHER_LIMIT = 500;
+
+    /** true = e-mail addresses are shown partly hidden (cb***77@school.ie). Set to false to show them in full. */
+    private const MASK_EMAILS = true;
 
     /** Linked ITIL objects shown in the timeline. */
     private const ITIL = [
@@ -593,6 +596,171 @@ class Timeline extends CommonGLPI
         return $events;
     }
 
+    public const T_SNAP   = 'glpi_plugin_devicetimeline_emailsnap';
+    public const T_EVENTS = 'glpi_plugin_devicetimeline_emailevents';
+
+    /**
+     * Finds the "Fields" plugin text field that holds the e-mail (field name contains "email")
+     * of a Computer container. Returns [table, column] or null.
+     */
+    private static function emailSource(): ?array
+    {
+        global $DB;
+
+        try {
+            if (!$DB->tableExists('glpi_plugin_fields_fields') || !$DB->tableExists('glpi_plugin_fields_containers')) {
+                return null;
+            }
+            foreach ($DB->request([
+                'SELECT'     => ['glpi_plugin_fields_fields.name AS fname', 'glpi_plugin_fields_containers.name AS cname'],
+                'FROM'       => 'glpi_plugin_fields_fields',
+                'INNER JOIN' => [
+                    'glpi_plugin_fields_containers' => [
+                        'ON' => ['glpi_plugin_fields_fields' => 'plugin_fields_containers_id', 'glpi_plugin_fields_containers' => 'id'],
+                    ],
+                ],
+                'WHERE'      => [
+                    'glpi_plugin_fields_fields.name' => ['LIKE', '%email%'],
+                    'glpi_plugin_fields_containers.itemtypes' => ['LIKE', '%Computer%'],
+                ],
+                'ORDER'      => 'glpi_plugin_fields_fields.id ASC',
+            ]) as $r) {
+                $table = 'glpi_plugin_fields_computer' . $r['cname'] . 's';
+                if ($DB->tableExists($table) && $DB->fieldExists($table, $r['fname'])) {
+                    return [$table, $r['fname']];
+                }
+            }
+        } catch (\Throwable $ex) {
+            // no e-mail field found
+        }
+        return null;
+    }
+
+    /**
+     * Compares the current e-mail values with the last known ones and stores a timeline event
+     * for every difference. The first run only stores the starting values (no events).
+     * $who = login name of the person who made the change (known only from the update hook).
+     */
+    public static function syncEmails(string $who = '-'): int
+    {
+        global $DB;
+
+        $new_events = 0;
+        try {
+            $src = self::emailSource();
+            if ($src === null || !$DB->tableExists(self::T_SNAP) || !$DB->tableExists(self::T_EVENTS)) {
+                return 0;
+            }
+            [$table, $col] = $src;
+
+            $known = [];
+            foreach ($DB->request(['FROM' => self::T_SNAP]) as $r) {
+                $known[(int) $r['computers_id']] = (string) $r['value'];
+            }
+            $first_run = !$known;
+
+            $now = date('Y-m-d H:i:s');
+            foreach ($DB->request(['SELECT' => ['items_id', $col], 'FROM' => $table, 'WHERE' => ['itemtype' => 'Computer']]) as $r) {
+                $id  = (int) $r['items_id'];
+                $val = trim((string) ($r[$col] ?? ''));
+                if (!array_key_exists($id, $known)) {
+                    $DB->insert(self::T_SNAP, ['computers_id' => $id, 'value' => $val]);
+                    if (!$first_run && $val !== '') {
+                        $DB->insert(self::T_EVENTS, ['computers_id' => $id, 'date_mod' => $now, 'old_value' => '', 'new_value' => $val, 'user_name' => $who]);
+                        $new_events++;
+                    }
+                } elseif ($known[$id] !== $val) {
+                    $DB->insert(self::T_EVENTS, ['computers_id' => $id, 'date_mod' => $now, 'old_value' => $known[$id], 'new_value' => $val, 'user_name' => $who]);
+                    $DB->update(self::T_SNAP, ['value' => $val], ['computers_id' => $id]);
+                    $new_events++;
+                }
+            }
+        } catch (\Throwable $ex) {
+            return $new_events;
+        }
+        return $new_events;
+    }
+
+    /** Update hook of the Fields plugin data object: runs the comparison with the name of the editor. */
+    public static function onFieldsUpdate($item): void
+    {
+        $who = (string) ($_SESSION['glpiname'] ?? '-');
+        self::syncEmails($who !== '' ? $who : '-');
+    }
+
+    /** GLPI automatic action (every 5 minutes) - catches changes made outside the GLPI form. */
+    public static function cronInfo($name)
+    {
+        return ['description' => 'Device Timeline: record changes of the Student Email field'];
+    }
+
+    public static function cronSyncEmails($task = null)
+    {
+        $n = self::syncEmails('-');
+        if ($task) {
+            $task->addVolume($n);
+        }
+        return 1;
+    }
+
+    /** jo***@school.ie - first two characters of the name and the domain stay visible. */
+    private static function maskEmail(string $v): string
+    {
+        $v = trim($v);
+        if (!self::MASK_EMAILS || $v === '') {
+            return $v;
+        }
+        $at = strrpos($v, '@');
+        if ($at === false) {
+            return mb_substr($v, 0, 2) . '***';
+        }
+        $local = substr($v, 0, $at);
+        $n     = mb_strlen($local);
+        if ($n <= 4) {
+            return mb_substr($local, 0, 1) . '***' . substr($v, $at);
+        }
+        return mb_substr($local, 0, 2) . '***' . mb_substr($local, -2) . substr($v, $at);
+    }
+
+    /** Stored e-mail changes (Fields plugin field) for this computer and for the others (latest 500). */
+    private static function emailEvents(int $computer_id, array $model_ids): array
+    {
+        global $DB;
+
+        $events = [];
+        try {
+            if (!$DB->tableExists(self::T_EVENTS)) {
+                return [];
+            }
+            foreach ($DB->request(['FROM' => self::T_EVENTS, 'ORDER' => ['date_mod DESC', 'id DESC'], 'LIMIT' => self::OTHER_LIMIT]) as $r) {
+                $events[] = [
+                    'date'     => (string) $r['date_mod'],
+                    'sid'      => (int) $r['id'],
+                    'key'      => 'email',
+                    'items_id' => (int) $r['computers_id'],
+                    'user'     => ($r['user_name'] ?? '') !== '' ? (string) $r['user_name'] : '-',
+                    'old'      => self::maskEmail((string) $r['old_value']),
+                    'new'      => self::maskEmail((string) $r['new_value']),
+                    'ref'      => 'E' . (int) $r['id'],
+                ];
+            }
+            foreach ($DB->request(['FROM' => self::T_EVENTS, 'WHERE' => ['computers_id' => $computer_id], 'ORDER' => ['date_mod DESC', 'id DESC']]) as $r) {
+                $dup = false;
+                foreach ($events as $e) {
+                    if ($e['ref'] === 'E' . (int) $r['id']) { $dup = true; break; }
+                }
+                if (!$dup) {
+                    $events[] = ['date' => (string) $r['date_mod'], 'sid' => (int) $r['id'], 'key' => 'email', 'items_id' => $computer_id,
+                        'user' => ($r['user_name'] ?? '') !== '' ? (string) $r['user_name'] : '-',
+                        'old' => self::maskEmail((string) $r['old_value']), 'new' => self::maskEmail((string) $r['new_value']), 'ref' => 'E' . (int) $r['id']];
+                }
+            }
+        } catch (\Throwable $ex) {
+            return [];
+        }
+        return $events;
+    }
+
     public static function showForComputer(int $computer_id): void
     {
         global $DB;
@@ -614,6 +782,7 @@ class Timeline extends CommonGLPI
             'ticket'   => 'Tickets',
             'change'   => 'Changes',
             'link'     => 'Links',
+            'email'    => 'Email',
         ];
         $kind_labels = [
             'comment'  => 'Comments',
@@ -623,6 +792,7 @@ class Timeline extends CommonGLPI
             'ticket'   => 'Ticket',
             'change'   => 'Change',
             'link'     => 'Link',
+            'email'    => 'Email',
         ];
 
         // Current computer and its model
@@ -714,6 +884,10 @@ class Timeline extends CommonGLPI
             $events[] = $ev;
         }
         foreach (self::itilEvents($computer_id) as $e) {
+            $events[] = $e;
+        }
+        self::syncEmails('-');
+        foreach (self::emailEvents($computer_id, $model_ids) as $e) {
             $events[] = $e;
         }
 
@@ -936,6 +1110,7 @@ class Timeline extends CommonGLPI
             'ticket'   => ['#f59f00', '#fff3d6'],
             'change'   => ['#0ca678', '#dcf5ee'],
             'link'     => ['#ae3ec9', '#f5e6fa'],
+            'email'    => ['#d6336c', '#fce4ee'],
         ];
         $color_css = '.dt-item { border-left-color: var(--dt-c, var(--tblr-primary, #206bc4)); }'
             . '.dt-item::before { background: var(--dt-c, var(--tblr-primary, #206bc4)); }'
