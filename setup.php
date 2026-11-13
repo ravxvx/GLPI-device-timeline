@@ -1,20 +1,23 @@
 <?php
 
 /**
- * Device Timeline - GLPI 11
+ * Device Timeline - GLPI 11 and 12
  * Shows the history of the "Comments" field of a Computer as a timeline.
  * Data comes from GLPI's own history log (glpi_logs) - no custom hook needed.
  */
 
 use GlpiPlugin\Devicetimeline\Timeline;
 
-define('PLUGIN_DEVICETIMELINE_VERSION', '2.11.0');
+define('PLUGIN_DEVICETIMELINE_VERSION', '2.14.1');
 
 function plugin_init_devicetimeline()
 {
     global $PLUGIN_HOOKS;
 
     $PLUGIN_HOOKS['csrf_compliant']['devicetimeline'] = true;
+
+    // Records changes of the Fields-plugin e-mail field when edited in GLPI (best effort; a cron task also checks)
+    $PLUGIN_HOOKS['item_update']['devicetimeline'] = ['PluginFieldsComputerschoolitinformation' => [Timeline::class, 'onFieldsUpdate']];
 
     // Adds the "Timeline" tab on Computer items
     Plugin::registerClass(Timeline::class, ['addtabon' => ['Computer']]);
@@ -31,7 +34,7 @@ function plugin_version_devicetimeline()
         'requirements' => [
             'glpi' => [
                 'min' => '11.0.0',
-                'max' => '11.0.99',
+                'max' => '12.99.99',
             ],
             'php'  => [
                 'min' => '8.2',
