@@ -8,6 +8,8 @@
 
 Device Timeline is an open-source plugin for GLPI 11 and 12 that provides a chronological history of computer assets.
 
+**Download:** [`devicetimeline-2.14.1.tar.gz`](https://github.com/ravxvx/GLPI-device-timeline/raw/main/dist/devicetimeline-2.14.1.tar.gz) – ready to upload in GLPI Plugin Uploader or to extract into the GLPI plugins folder.
+
 ## Features
 
 - View computer history in a timeline or table.
